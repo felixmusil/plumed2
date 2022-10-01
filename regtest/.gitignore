@@ -33,6 +33,8 @@
 !/s2cm
 !/pytorch
 !/membranefusion
+!/pyjax
+
 # These files we just want to ignore completely
 tmp
 report.txt

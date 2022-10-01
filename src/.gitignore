@@ -55,6 +55,7 @@
 !/s2cm
 !/pytorch
 !/membranefusion
+!/pyjax
 
 # And just ignore these files
 *.xxd
