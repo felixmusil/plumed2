@@ -4,7 +4,7 @@ in `plumed2` directory:
 
 
 ```
-pip install find_libpython pybin11
+pip install find_libpython pybind11
 
 
 ./configure  LDFLAGS="-Wl,-rpath,`python3-config --prefix`/lib `find_libpython`"

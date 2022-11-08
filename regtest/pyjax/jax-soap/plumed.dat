@@ -1,0 +1,9 @@
+
+cv1:  JAXCV ATOMS=@mdatoms IMPORT=jaxcv FUNCTION=test
+
+DUMPDERIVATIVES ARG=cv1  FILE=GRAD_cv1  FMT=%8.4f
+
+PRINT FILE=colvar.out ARG=*
+
+
+

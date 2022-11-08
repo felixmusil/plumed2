@@ -41,14 +41,18 @@ int PythonPlumedBase::use_count=0; // static
 
 PythonPlumedBase::PythonPlumedBase() {
   if(use_count==0) {
-    // std::cout << "------ init" << std::endl;
+    std::cout << "------ init" << std::endl;
     py::initialize_interpreter();
   } else {
-    // std::cout << "------ reusing" << std::endl;
+    std::cout << "------ reusing" << std::endl;
   }
   use_count++;
 }
 
+// PythonPlumedBase::~PythonPlumedBase() {
+//   py::finalize_interpreter();
+//   std::cout << "------ killing" << std::endl;
+// }
 // Finalization is tricky, because it should happen AFTER the
 // destruction of the derived classes (which contain py::
 // objects). Not doing it.
