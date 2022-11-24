@@ -20,6 +20,7 @@ from jax_soap import (shifted_cosine_cutoff, radial_integral_gto_basis,
                     power_spectrum, compute_cosine_kernel,
                     mask_centers_by_sp, batch, ase2atomicdata, Pad, unpad_grad)
 
+
 nmax = 8
 lmax = 4
 rc = 10
@@ -119,18 +120,8 @@ kernel_and_grad_fn = eqx.filter_value_and_grad(compute_fn, arg=grad_filter_fn)
 
 pad = Pad(2, 100, 1000)
 
-# nl_fn = partial(ase2atomicdata, rc=rc, self_interaction=True, mask_centers_fn=mask_fn)
 
 def test_(x, box, frame, pad):
-
-    # print("COMPUTE")
-    # print("x", x.shape, x.dtype)
-    # print("cell", box)
-    # print(frame)
-    # print(frame.numbers.shape)
-    # print(x[:10])
-    # data = update_atomicdata(rc, frame, data, x, box,
-    #                         self_interaction=True, mask_centers_fn=mask_fn)
     timer = {}
     timer['data'] = Timer(tag='timer')
     timer['compute'] = Timer(tag='compute')
@@ -139,7 +130,7 @@ def test_(x, box, frame, pad):
     with timer['data']:
         data = ase2atomicdata(frame=frame, rc=rc, self_interaction=True, mask_centers_fn=mask_fn)
     pdata = pad(data)
-    print('DO')
+    # print('DO')
     with timer['compute']:
         K, dK = kernel_and_grad_fn(pdata)
         dK = unpad_grad(dK, pdata)
@@ -147,7 +138,6 @@ def test_(x, box, frame, pad):
         print(tt)
     dK_dr = dK.pos
     dK_ds = jnp.squeeze(dK.cell)
-    # print(dK_dr.shape, dK_ds.shape)
     return K, dK_dr, dK_ds
 
 test = partial(test_, frame=frame, pad=pad)
