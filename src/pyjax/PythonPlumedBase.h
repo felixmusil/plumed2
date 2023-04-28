@@ -30,7 +30,7 @@ namespace pycv {
 
 typedef float pycv_t;		// May need to adapt to the build precision?
 
-
+#pragma GCC visibility push(hidden)
 class PythonPlumedBase {
 public:
   const std::string PYTHONCV_CITATION = "Giorgino, (2019). PYCV: a PLUMED 2 Module Enabling the Rapid Prototyping of Collective Variables in Python. Journal of Open Source Software, 4(42), 1773. doi:10.21105/joss.01773";
@@ -46,7 +46,7 @@ private:
   static int use_count;
 
 };
-
+#pragma GCC visibility pop
 }
 }
 

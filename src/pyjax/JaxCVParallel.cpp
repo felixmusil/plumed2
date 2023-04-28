@@ -14,19 +14,23 @@ GNU Lesser General Public License for more details.
 You should have received a copy of the GNU Lesser General Public License
 along with plumed.  If not, see <http://www.gnu.org/licenses/>.
 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
-#include "PythonPlumedBase.h"
 
 #include "core/PlumedMain.h"
 #include "colvar/Colvar.h"
 #include "colvar/ActionRegister.h"
 #include "tools/Pbc.h"
+#include "tools/NeighborListParallel.h"
+#include "tools/Communicator.h"
+#include "math.h"
 
-#include <pybind11/embed.h> // everything needed for embedding
-#include <pybind11/numpy.h>
+#include "PythonPlumedBase.h"
+
+// #include <pybind11/embed.h> // everything needed for embedding
+// #include <pybind11/numpy.h>
 
 #include <string>
 #include <cmath>
-
+#include <iostream>
 
 using namespace std;
 namespace py = pybind11;
@@ -35,174 +39,11 @@ namespace py = pybind11;
 namespace PLMD {
 namespace pycv {
 
-//+PLUMEDOC COLVAR PYTHONCV
-/*
-Define collective variables in the Python language.
-
-A Python module named in the `IMPORT` keyword is first imported.  The
-function passed as the `FUNCTION` keyword is called at each time
-step. It is assumed to receive a numpy array of shape `(N,3)` with the
-coordinates of the `ATOMS` listed in the action.
-
-In the scalar case (`COMPONENTS` keyword not given), the function
-should return two values: a scalar (the CV value), and its gradient
-with respect to each coordinate (an array of the same shape as the
-input). Not returning the gradient will prevent biasing from working
-(with warnings).
-
-If a list of `COMPONENTS` is given, multiple components can be
-computed at once, as described in the section *Multiple components*.
-
-Automatic differentiation and transparent compilation (including to
-GPU) can be performed via Google's [JAX
-library](https://github.com/google/jax): see the example below.
-
-
-\par Examples
-
-The following input tells PLUMED to print the distance between atoms 1
-and 4.
-
-\plumedfile
-cv1: PYTHONCV ATOMS=1,4 IMPORT=distcv FUNCTION=cv
-PRINT FILE=colvar.out ARG=*
-
-\endplumedfile
-
-The file `distcv.py` should contain something as follows.
-
-@code{.py}
-import numpy as np
-
-# Define the distance function
-def dist_f(x):
-    r = x[0,:]-x[1,:]
-    d2 = np.dot(r,r)
-    return np.sqrt(d2)
-
-def grad_dist(x):
-    d = dist(x)
-    r = x[0,:]-x[1,:]
-    g = r/d
-    return np.array([g,-g])
-
-# The CV function actually called
-def cv(x):
-    return dist_f(x), grad_dist(x)
-
-@endcode
-
-
-\par JAX for automatic differentiation and compilation
-
-Automatic differentiation and transparent compilation (including to
-GPU) can be performed via Google's [JAX
-library](https://github.com/google/jax). In a nutshell, it's sufficient
-to replace `numpy` with `jax.numpy`. See the following example.
-
-
-\plumedfile
-cv1: PYTHONCV ATOMS=1,2,3 IMPORT=jaxcv FUNCTION=angle
-PRINT FILE=colvar.out ARG=*
-
-\endplumedfile
-
-
-And, in `jaxcv.py`...
-
-@code{.py}
-# Import the JAX library
-import jax.numpy as np
-from jax import grad, jit, vmap
-
-# Implementation of the angle function
-def angle_f(x):
-    r1 = x[0,:]-x[1,:]
-    r2 = x[2,:]-x[1,:]
-
-    costheta = np.dot(r1,r2) / np.linalg.norm(r1) / np.linalg.norm(r2)
-    theta = np.arccos(costheta)
-    return theta
-
-# Use JAX to auto-gradient it
-angle_grad = grad(angle)
-
-# The CV function actually called
-def angle(x):
-    return angle_f(x), angle_grad(x)
-@endcode
-
-
-There are however
-[limitations](https://github.com/google/jax#current-gotchas), the most
-notable of which is that indexed assignments such as `x[i]=y` are not
-allowed, and should instead be replaced by functional equivalents such
-as `x=jax.ops.index_update(x, jax.ops.index[i], y)`.
-
-
-\par Multiple components
-
-It is possible to return multiple components at a time. This may be
-useful e.g. if they reuse part of the computation. To do so, pass the
-`COMPONENTS=comp1,comp2,...` keyword. In this case, the function is
-expected to provide two return values: (a) a dictionary of values; and
-(b) a dictionary of gradients. Dictionary keys must be the same names
-indicated in the `COMPONENTS` keyword. Inside PLUMED, component names
-will be prefixed by `py-`.
-
-Note that you can use JAX's Jacobian function `jax.jacrev()` to
-conveniently compute the gradients all at once (see regtests). For
-example:
-
-\plumedfile
-cv1:  PYTHONCV ATOMS=1,3,4 IMPORT=distcv FUNCTION=cv COMPONENTS=d12,d13
-\endplumedfile
-
-@code{.py}
-import jax.numpy as np
-from jax import grad, jacrev, jit
-
-# Define the distance function
-@jit
-def cv_f(X):
-    return {
-     'd12': np.linalg.norm( X[0,:]-X[1,:] ),
-     'd13': np.linalg.norm( X[0,:]-X[2,:] )
-     }
-
-cv_j=jacrev(cv_f)
-
-def cv(X):
-    return cv_f(X), cv_j(X)
-@endcode
-
-
-
-\par Installation
-
-Make sure you have Python 3 installed. It currently does not seem to
-work well with Conda under OSX (Homebrew's Python 3 is ok).  If you
-are feeling lucky, this may work:
-
-\verbatim
-pip3 install numpy jax jaxlib
-./configure --enable-modules=+pycv
-\endverbatim
-
-At run time, you may need to set the `PYTHONHOME` or other
-environment libraries.
-
-
-*/
-//+ENDPLUMEDOC
-
-
-
 #pragma GCC visibility push(hidden)
-class PythonCV : public Colvar,
+class JAXCVMPI : public Colvar,
   public PythonPlumedBase {
 
-  string style="NUMPY";
+  string style="JAX"; // JAX PYTHON
   string import;
   string function_name;
 
@@ -210,26 +51,35 @@ class PythonCV : public Colvar,
   int ncomponents;
 
   py::array_t<pycv_t, py::array::c_style> py_X;
+  py::array_t<pycv_t, py::array::c_style> py_box;
+  py::array_t<pycv_t, py::array::c_style> py_NL;
   // pycv_t *py_X_ptr;    /* For when we want to speed up */
 
   int natoms;
   bool pbc;
+  bool serial;
+  // Neighbor list stuff
+  bool doneigh;
+  NeighborListParallel *nl;
+  vector<AtomNumber> atoms;
+  bool invalidateList;
+  bool firsttime;
 
   void check_dim(py::array_t<pycv_t>);
   void calculateSingleComponent(py::object &);
   void calculateMultiComponent(py::object &);
 
 public:
-  explicit PythonCV(const ActionOptions&);
+  explicit JAXCVMPI(const ActionOptions&);
 // active methods:
   virtual void calculate();
   static void registerKeywords( Keywords& keys );
 };
 #pragma GCC visibility pop
 
-PLUMED_REGISTER_ACTION(PythonCV,"PYTHONCV")
+PLUMED_REGISTER_ACTION(JAXCVMPI,"JAXCVMPI")
 
-void PythonCV::registerKeywords( Keywords& keys ) {
+void JAXCVMPI::registerKeywords( Keywords& keys ) {
   Colvar::registerKeywords( keys );
   keys.add("atoms","ATOMS","the list of atoms to be passed to the function");
   keys.add("optional","STYLE","Python types, one of NATIVE, NUMPY or JAX [not implemented]");
@@ -237,17 +87,25 @@ void PythonCV::registerKeywords( Keywords& keys ) {
   keys.add("compulsory","FUNCTION","the function to call");
   keys.add("optional","COMPONENTS","if provided, the function will return multiple components, with the names given");
   keys.addOutputComponent("py","COMPONENTS","Each of the components output py the Python code, prefixed by py-");
-  // Why is NOPBC not listed here?
+  keys.addFlag("SERIAL",false,"Perform the calculation in serial - for debug purpose");
+  keys.add("compulsory","NL_CUTOFF","The cutoff for the neighbor list");
+  keys.add("optional","NL_STRIDE","The frequency with which we are updating the atoms in the neighbour list. If non specified or negative, it checks every step and rebuilds as needed.");
+  keys.add("optional","NL_SKIN","The skin to use for recomputing the NL if no stride is set.");
 }
 
-PythonCV::PythonCV(const ActionOptions&ao):
+JAXCVMPI::JAXCVMPI(const ActionOptions&ao):
   PLUMED_COLVAR_INIT(ao),
-  pbc(false)
+  pbc(true),
+  serial(false),
+  invalidateList(true),
+  firsttime(true)
 {
-  vector<AtomNumber> atoms;
+
   parseAtomList("ATOMS",atoms);
   natoms = atoms.size();
   if(natoms==0) error("At least one atom is required");
+
+  log.printf("  using periodic boundary conditions\n");
 
   parse("STYLE",style);
   parse("IMPORT",import);
@@ -256,9 +114,25 @@ PythonCV::PythonCV(const ActionOptions&ao):
   parseVector("COMPONENTS",components);
   ncomponents=components.size();
 
-  bool nopbc=!pbc;
-  parseFlag("NOPBC",nopbc);
-  pbc=!nopbc;
+  parseFlag("SERIAL",serial);
+
+  // neighbor list stuff
+  doneigh=false;
+  bool nl_full_list=false;
+  double nl_cut=0.0;
+  double nl_skin=0.0;
+  int nl_st=-1;
+  parseFlag("NLIST",doneigh);
+  if(doneigh){
+    parse("NL_CUTOFF",nl_cut);
+    if(nl_cut<=0.0) error("NL_CUTOFF should be explicitly specified and positive");
+    parse("NL_STRIDE",nl_st);
+    parse("NL_SKIN",nl_skin);
+  }
+
+  // bool nopbc=!pbc;
+  // parseFlag("NOPBC",nopbc);
+  // pbc=!nopbc;
 
   checkRead();
 
@@ -269,10 +143,27 @@ PythonCV::PythonCV(const ActionOptions&ao):
     log.printf("  it is expected to return dictionaries with %d components\n", ncomponents);
   }
 
+  log.printf("Using full Neighborlist");
+  nl_full_list=true;
 
-  log<<"  Bibliography "
-     <<plumed.cite(PYTHONCV_CITATION)
-     <<"\n";
+  nl= new NeighborListParallel(atoms,pbc,getPbc(),comm,log,nl_cut,
+                                nl_full_list,nl_st,nl_skin);
+  requestAtoms(nl->getFullAtomList());
+  log.printf("  using neighbor lists with\n");
+  log.printf("  cutoff %f, and skin %f\n",nl_cut,nl_skin);
+  if(nl_st>=0){
+    log.printf("  update every %d steps\n",nl_st);
+  } else {
+    log.printf("  checking every step for dangerous builds and rebuilding as needed\n");
+  }
+  if (nl_full_list) {
+    log.printf("  using a full neighbor list\n");
+  } else {
+    log.printf("  using a half neighbor list\n");
+  }
+  // log<<"  Bibliography "
+  //    <<plumed.cite(PYTHONCV_CITATION)
+  //    <<"\n";
 
   if(ncomponents) {
     for(auto c: components) {
@@ -286,7 +177,7 @@ PythonCV::PythonCV(const ActionOptions&ao):
     setNotPeriodic();
   }
 
-  requestAtoms(atoms);
+  // requestAtoms(atoms);
 
   // ----------------------------------------
 
@@ -297,6 +188,8 @@ PythonCV::PythonCV(const ActionOptions&ao):
 
   // ...and the coordinates array
   py_X = py::array_t<pycv_t>({natoms,3});
+  py_box = py::array_t<pycv_t>({3,3});
+  py_NL = py::array_t<pycv_t>({2,4});
   // ^ 2nd template argument may be py::array::c_style if needed
   // py_X_ptr = (pycv_t *) py_X.request().ptr;
 
@@ -304,9 +197,44 @@ PythonCV::PythonCV(const ActionOptions&ao):
 
 
 // calculator
-void PythonCV::calculate() {
+void JAXCVMPI::calculate() {
 
-  if(pbc) makeWhole();
+  // if(pbc) makeWhole();
+  // jnp.mod(dR + side * f32(0.5), side) - f32(0.5) * side
+  // Setup parallelization
+  unsigned stride=comm.Get_size();
+  unsigned rank=comm.Get_rank();
+  if(serial){
+    stride=1;
+    rank=0;
+  }else{
+    stride=comm.Get_size();
+    rank=comm.Get_rank();
+  }
+  std::cout << "rank: " << rank << " / stride: " << stride << std::endl;
+
+  if(invalidateList){
+    nl->update(getPositions());
+  }
+
+  std::vector<unsigned> neighbors;
+  std::vector<unsigned> centers;
+  for(unsigned int i=0;i<nl->getNumberOfLocalAtoms();i++) {
+    std::vector<unsigned> neighbors_i;
+    unsigned i_atom=nl->getIndexOfLocalAtom(i);
+    neighbors_i=nl->getNeighbors(i_atom);
+    for(unsigned int j=0;j<neighbors_i.size();j++) {
+        centers.push_back(i_atom);
+        neighbors.push_back(neighbors_i[j]);
+    }
+  }
+  auto n_neigh{static_cast<size_t>(neighbors.size())};
+  py_NL.resize(std::vector<size_t>{2,n_neigh});
+  for(unsigned int i=0;i<neighbors.size();i++) {
+    py_NL.mutable_at(0,i) = centers[i];
+    py_NL.mutable_at(1,i) = neighbors[i];
+    std::cout << "i,j: " << centers[i] << ", " << neighbors[i]<< std::endl;
+  }
 
   // Is there a faster way to get in bulk? We could even wrap a C++ array without copying.
   // Also, it may be faster to access the pointer rather than use "at"
@@ -316,9 +244,22 @@ void PythonCV::calculate() {
     py_X.mutable_at(i,1) = xi[1];
     py_X.mutable_at(i,2) = xi[2];
   }
+  auto& pbc{getPbc()};
+  auto& box{pbc.getBox()};
+  for(int i=0; i<3; i++) {
+    for(int j=0; j<3; j++) {
+      py_box.mutable_at(i,j) = box(i,j);
+    }
+  }
+  // log.printf("Hello, World!");
+  // log.printf("X", py_X);
 
+  // py::print("Hello, World!");
+  // py::print("X", py_X);
+  // py::print("box", py_box);
+  py::print("NL", py_NL);
   // Call the function
-  py::object r = py_fcn(py_X);
+  py::object r = py_fcn(py_X, py_box, py_NL);
 
   if(ncomponents>0) {		// MULTIPLE NAMED COMPONENTS
     calculateMultiComponent(r);
@@ -329,7 +270,7 @@ void PythonCV::calculate() {
 }
 
 
-void PythonCV::calculateSingleComponent(py::object &r) {
+void JAXCVMPI::calculateSingleComponent(py::object &r) {
   // Is there more than 1 return value?
   if(py::isinstance<py::tuple>(r)) {
     // 1st return value: CV
@@ -349,6 +290,16 @@ void PythonCV::calculateSingleComponent(py::object &r) {
                   grad.at(i,2));
       setAtomsDerivatives(i,gi);
     }
+
+    py::array_t<pycv_t> pyvirial(rl[2]);
+    Tensor virial;
+    for(unsigned i=0; i<3; i++) {
+        for(unsigned j=0; j<3; j++) {
+            virial(i,j) = pyvirial.at(i,j);
+        }
+    }
+
+    setBoxDerivatives(virial);
   } else {
     // Only value returned. Might be an error as well.
     log.printf(BIASING_DISABLED);
@@ -359,7 +310,7 @@ void PythonCV::calculateSingleComponent(py::object &r) {
 }
 
 
-void PythonCV::calculateMultiComponent(py::object &r) {
+void JAXCVMPI::calculateMultiComponent(py::object &r) {
   if(! py::isinstance<py::tuple>(r)) {        // Is there more than 1 return value?
     error("Sorry, multi-components needs to return gradients too");
   }
@@ -399,7 +350,7 @@ void PythonCV::calculateMultiComponent(py::object &r) {
 
 
 // Assert correct gradient shape
-void PythonCV::check_dim(py::array_t<pycv_t> grad) {
+void JAXCVMPI::check_dim(py::array_t<pycv_t> grad) {
   if(grad.ndim() != 2 ||
       grad.shape(0) != natoms ||
       grad.shape(1) != 3) {
@@ -414,22 +365,4 @@ void PythonCV::check_dim(py::array_t<pycv_t> grad) {
 }
 }
 
-
-
-/*
-  Ideas for further developments
-
- * DONE Also enable access to other CVs instead of coordinates?
- * DONE Multicolvar in some way?
- * Pass the full atom coordinates structure directly?
- * Pass a subset of pairwise distances instead of coordinates?
- * Box derivatives for PBC?
- * Pass the jax array directly (check how may copies are being done)
- * Benchmark
- * More access to Plumed data, e.g.
-   * Box size
-   * Topology information
-   * Functions for PBC wrapping/closest image
-
-   */
 

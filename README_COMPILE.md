@@ -6,8 +6,9 @@ in `plumed2` directory:
 ```
 pip install find_libpython pybind11
 
+./configure   LDFLAGS="-Wl,-rpath,`python3-config --prefix`/lib `find_libpython`"
 
-./configure  LDFLAGS="-Wl,-rpath,`python3-config --prefix`/lib `find_libpython`"
+./configure  LDFLAGS="-Wl,-rpath,`python3-config --prefix`/lib `find_libpython`" CPPFLAGS="`python3 -m pybind11 --includes`"
 
 make -j 10
 # add plumed in the path

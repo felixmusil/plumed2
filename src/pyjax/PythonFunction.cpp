@@ -106,6 +106,7 @@ See \ref CUSTOM for a non-Python equivalent.
 
 
 
+#pragma GCC visibility push(hidden)
 class PythonFunction :
   public function::Function,
   public PythonPlumedBase {
@@ -126,6 +127,7 @@ public:
   virtual void calculate();
   static void registerKeywords( Keywords& keys );
 };
+#pragma GCC visibility pop
 
 PLUMED_REGISTER_ACTION(PythonFunction,"PYTHONFUNCTION")
 

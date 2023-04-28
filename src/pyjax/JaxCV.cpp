@@ -35,7 +35,7 @@ namespace py = pybind11;
 namespace PLMD {
 namespace pycv {
 
-
+#pragma GCC visibility push(hidden)
 class JaxCV : public Colvar,
   public PythonPlumedBase {
 
@@ -64,7 +64,7 @@ public:
   virtual void calculate();
   static void registerKeywords( Keywords& keys );
 };
-
+#pragma GCC visibility pop
 PLUMED_REGISTER_ACTION(JaxCV,"JAXCV")
 
 void JaxCV::registerKeywords( Keywords& keys ) {
